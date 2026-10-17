@@ -1,12 +1,14 @@
 package stockexchange.models;
 
 import java.util.UUID;
+import java.util.concurrent.locks.ReentrantLock;
 
 public class Order {
     private final UUID id;
     private final UUID traderId;
     private final Company company;
     private final OrderSide side;
+    private final ReentrantLock lock = new ReentrantLock();
     private int price;
     private int remainingQuantity;
 
@@ -56,10 +58,64 @@ public class Order {
     }
 
     public int getPrice() {
-        return price;
+        lock.lock();
+        try {
+            return price;
+        } finally {
+            lock.unlock();
+        }
     }
 
     public int getRemainingQuantity() {
-        return remainingQuantity;
+        lock.lock();
+        try {
+            return remainingQuantity;
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    public void updateTerms(int price, int remainingQuantity) {
+        if (price <= 0) {
+            throw new IllegalArgumentException("Price must be positive");
+        }
+        if (remainingQuantity <= 0) {
+            throw new IllegalArgumentException("Quantity must be positive");
+        }
+
+        lock.lock();
+        try {
+            if (this.remainingQuantity == 0) {
+                throw new IllegalStateException("A fully filled order cannot be modified");
+            }
+            this.price = price;
+            this.remainingQuantity = remainingQuantity;
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    public void reduceQuantity(int quantity) {
+        if (quantity <= 0) {
+            throw new IllegalArgumentException("Quantity must be positive");
+        }
+
+        lock.lock();
+        try {
+            if (quantity > remainingQuantity) {
+                throw new IllegalArgumentException("Quantity must not exceed the remaining quantity");
+            }
+            remainingQuantity -= quantity;
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    public void lock() {
+        lock.lock();
+    }
+
+    public void unlock() {
+        lock.unlock();
     }
 }
