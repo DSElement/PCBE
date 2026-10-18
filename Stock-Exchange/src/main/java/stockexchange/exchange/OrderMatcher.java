@@ -10,13 +10,10 @@ import java.util.Queue;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentLinkedQueue;
 
-public class OrderMatcher {
+class OrderMatcher {
     private final Queue<Trade> trades = new ConcurrentLinkedQueue<>();
 
-    public void match(OrderBook orderBook, Order order) {
-        if (orderBook == null || order == null) {
-            throw new IllegalArgumentException("Order book and order must not be null");
-        }
+    void match(OrderBook orderBook, Order order) {
         if (orderBook.findOrder(order.getId()) != order) {
             return;
         }
@@ -36,7 +33,7 @@ public class OrderMatcher {
         }
     }
 
-    public List<Trade> getTradesSnapshot() {
+    List<Trade> getTradesSnapshot() {
         return List.copyOf(trades);
     }
 
@@ -48,9 +45,8 @@ public class OrderMatcher {
         try {
             second.lock();
             try {
-                if (orderBook.findOrder(order.getId()) != order
-                        || orderBook.findOrder(candidate.getId()) != candidate
-                        || order.getRemainingQuantity() == 0
+                // Only filled orders leave the book, so zero quantity also detects stale entries.
+                if (order.getRemainingQuantity() == 0
                         || candidate.getRemainingQuantity() == 0
                         || order.getPrice() != expectedPrice
                         || candidate.getPrice() != expectedPrice) {

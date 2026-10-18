@@ -2,14 +2,16 @@ package stockexchange.exchange;
 
 import stockexchange.models.Company;
 import stockexchange.models.Order;
+import stockexchange.models.OrderSide;
 import stockexchange.models.Trade;
 
 import java.util.List;
+import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
 
 public class Exchange {
     private final ConcurrentMap<String, OrderBook> orderBooks = new ConcurrentHashMap<>();
@@ -36,13 +38,39 @@ public class Exchange {
         }
     }
 
-    public Future<?> submitOrder(Order order) {
-        if (order == null) {
-            throw new IllegalArgumentException("Order must not be null");
-        }
-        OrderBook orderBook = getRegisteredOrderBook(order.getCompany().getStockSymbol());
+    /** Returns the generated order ID and a handle to its asynchronous matching pass. */
+    public OrderSubmission submitOrder(UUID traderId, String stockSymbol, OrderSide side,
+                                       int price, int quantity) {
+        OrderBook orderBook = getRegisteredOrderBook(stockSymbol);
+        Order order = new Order(traderId, orderBook.getCompany(), side, price, quantity);
         orderBook.addOrder(order);
-        return matchingWorkers.submit(() -> orderMatcher.match(orderBook, order));
+        CompletableFuture<Void> matchingTask = CompletableFuture.runAsync(
+                () -> orderMatcher.match(orderBook, order), matchingWorkers);
+        return new OrderSubmission(order.getId(), matchingTask);
+    }
+
+    /** Updates the remaining quantity and price, then schedules another matching pass. */
+    public CompletableFuture<Void> modifyOrder(UUID traderId, String stockSymbol, UUID orderId,
+                                               int price, int remainingQuantity) {
+        if (traderId == null) {
+            throw new IllegalArgumentException("Trader ID must not be null");
+        }
+        if (orderId == null) {
+            throw new IllegalArgumentException("Order ID must not be null");
+        }
+
+        OrderBook orderBook = getRegisteredOrderBook(stockSymbol);
+        Order order = orderBook.findOrder(orderId);
+        if (order == null) {
+            throw new IllegalStateException("Order is not active or does not exist");
+        }
+        if (!order.getTraderId().equals(traderId)) {
+            throw new IllegalArgumentException("Only the order's owner can modify it");
+        }
+
+        order.updateTerms(price, remainingQuantity);
+
+        return CompletableFuture.runAsync(() -> orderMatcher.match(orderBook, order), matchingWorkers);
     }
 
     public List<Company> getCompaniesSnapshot() {

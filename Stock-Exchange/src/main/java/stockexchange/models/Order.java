@@ -12,11 +12,8 @@ public class Order {
     private int price;
     private int remainingQuantity;
 
-    public Order(UUID id, UUID traderId, Company company, OrderSide side,
+    public Order(UUID traderId, Company company, OrderSide side,
                  int price, int remainingQuantity) {
-        if (id == null) {
-            throw new IllegalArgumentException("Order ID must not be null");
-        }
         if (traderId == null) {
             throw new IllegalArgumentException("Trader ID must not be null");
         }
@@ -33,7 +30,7 @@ public class Order {
             throw new IllegalArgumentException("Quantity must be positive");
         }
 
-        this.id = id;
+        this.id = UUID.randomUUID();
         this.traderId = traderId;
         this.company = company;
         this.side = side;
