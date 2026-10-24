@@ -10,7 +10,7 @@ import java.util.Queue;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentLinkedQueue;
 
-class OrderMatcher {
+public class OrderMatcher {
     private final Queue<Trade> trades = new ConcurrentLinkedQueue<>();
 
     void match(OrderBook orderBook, Order order) {
@@ -37,7 +37,12 @@ class OrderMatcher {
         return List.copyOf(trades);
     }
 
-    private void executeTrade(OrderBook orderBook, Order order, Order candidate, int expectedPrice) {
+    void executeTrade(OrderBook orderBook, Order order, Order candidate, int expectedPrice) {
+        // Lock ordering by id is only safe if ids are unique; OrderBook.addOrder enforces this.
+        if (order.getId().equals(candidate.getId())) {
+            throw new IllegalStateException("Two different orders share the id " + order.getId());
+        }
+
         Order first = order.getId().compareTo(candidate.getId()) < 0 ? order : candidate;
         Order second = first == order ? candidate : order;
 
@@ -45,35 +50,51 @@ class OrderMatcher {
         try {
             second.lock();
             try {
-                // Only filled orders leave the book, so zero quantity also detects stale entries.
-                if (order.getRemainingQuantity() == 0
-                        || candidate.getRemainingQuantity() == 0
-                        || order.getPrice() != expectedPrice
-                        || candidate.getPrice() != expectedPrice) {
-                    return;
-                }
-
-                Order buy = order.getSide() == OrderSide.BUY ? order : candidate;
-                Order sell = order.getSide() == OrderSide.SELL ? order : candidate;
-                int quantity = Math.min(buy.getRemainingQuantity(), sell.getRemainingQuantity());
-                Trade trade = new Trade(UUID.randomUUID(), buy.getId(), sell.getId(),
-                        orderBook.getCompany(), expectedPrice, quantity, Instant.now());
-
-                buy.reduceQuantity(quantity);
-                sell.reduceQuantity(quantity);
-                trades.add(trade);
-
-                if (buy.getRemainingQuantity() == 0) {
-                    orderBook.removeFilledOrder(buy);
-                }
-                if (sell.getRemainingQuantity() == 0) {
-                    orderBook.removeFilledOrder(sell);
-                }
+                settleTrade(orderBook, order, candidate, expectedPrice);
             } finally {
                 second.unlock();
             }
         } finally {
             first.unlock();
+        }
+    }
+
+    void settleTrade(OrderBook orderBook, Order order, Order candidate, int expectedPrice) {
+        if (order.getRemainingQuantity() == 0
+                || candidate.getRemainingQuantity() == 0
+                || order.getPrice() != expectedPrice
+                || candidate.getPrice() != expectedPrice) {
+            return;
+        }
+
+        Order buy = order.getSide() == OrderSide.BUY ? order : candidate;
+        Order sell = order.getSide() == OrderSide.SELL ? order : candidate;
+        int quantity = Math.min(buy.getRemainingQuantity(), sell.getRemainingQuantity());
+        Trade trade = new Trade(UUID.randomUUID(), buy.getId(), sell.getId(),
+                orderBook.getCompany(), expectedPrice, quantity, Instant.now());
+
+        beforeReducingQuantities();
+        buy.reduceQuantity(quantity);
+        sell.reduceQuantity(quantity);
+        trades.add(trade);
+
+        if (buy.getRemainingQuantity() == 0) {
+            orderBook.removeFilledOrder(buy);
+        }
+        if (sell.getRemainingQuantity() == 0) {
+            orderBook.removeFilledOrder(sell);
+        }
+    }
+
+    /** Hook between reading the quantities and applying the trade; the correct matcher does nothing. */
+    void beforeReducingQuantities() {
+    }
+
+    static void pause(long millis) {
+        try {
+            Thread.sleep(millis);
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
         }
     }
 }

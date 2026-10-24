@@ -12,10 +12,11 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 public class Exchange {
     private final ConcurrentMap<String, OrderBook> orderBooks = new ConcurrentHashMap<>();
-    private final OrderMatcher orderMatcher = new OrderMatcher();
+    private final OrderMatcher orderMatcher;
     private final ExecutorService matchingWorkers;
 
     public Exchange() {
@@ -23,9 +24,17 @@ public class Exchange {
     }
 
     public Exchange(int workerCount) {
+        this(workerCount, new OrderMatcher());
+    }
+
+    public Exchange(int workerCount, OrderMatcher orderMatcher) {
         if (workerCount <= 0) {
             throw new IllegalArgumentException("Worker count must be positive");
         }
+        if (orderMatcher == null) {
+            throw new IllegalArgumentException("Order matcher must not be null");
+        }
+        this.orderMatcher = orderMatcher;
         matchingWorkers = Executors.newFixedThreadPool(workerCount);
     }
 
@@ -71,6 +80,12 @@ public class Exchange {
         order.updateTerms(price, remainingQuantity);
 
         return CompletableFuture.runAsync(() -> orderMatcher.match(orderBook, order), matchingWorkers);
+    }
+
+    /** Stops accepting matching work and waits for the queued matching passes to finish. */
+    public boolean shutdownAndAwait(long timeout, TimeUnit unit) throws InterruptedException {
+        matchingWorkers.shutdown();
+        return matchingWorkers.awaitTermination(timeout, unit);
     }
 
     public List<Company> getCompaniesSnapshot() {
